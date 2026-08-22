@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#5b4bdb" />
+  <meta name="description" content="Aplicación de prueba para recibir avisos de asistencia MODEC." />
+  <title>MODEC Familia - Prueba Push</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icons/icon-192.png" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <header class="hero">
+      <div class="logo">M</div>
+      <div>
+        <h1>MODEC Familia</h1>
+        <p>Prueba aislada de notificaciones de asistencia</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <h2>1. Preparar este dispositivo</h2>
+      <label for="device-name">Nombre del dispositivo</label>
+      <input
+        id="device-name"
+        type="text"
+        maxlength="60"
+        placeholder="Ejemplo: Celular de María"
+        autocomplete="off"
+      />
+
+      <button id="enable-push" class="primary" type="button">
+        Activar notificaciones
+      </button>
+
+      <p id="status" class="status" role="status">
+        Esperando activación.
+      </p>
+    </section>
+
+    <section id="link-card" class="card hidden">
+      <h2>2. Descargar vinculación</h2>
+      <p>
+        Este archivo contiene la suscripción necesaria para que la
+        computadora del colegio pueda enviar notificaciones a este equipo.
+      </p>
+
+      <div class="device-code-row">
+        <span>Código del dispositivo</span>
+        <strong id="device-code">—</strong>
+      </div>
+
+      <div class="actions">
+        <button id="download-link" class="primary" type="button">
+          Descargar vinculación
+        </button>
+        <button id="copy-link" class="secondary" type="button">
+          Copiar JSON
+        </button>
+      </div>
+
+      <details>
+        <summary>Ver datos técnicos</summary>
+        <pre id="subscription-output"></pre>
+      </details>
+    </section>
+
+    <section class="card note-card">
+      <h2>Requisitos de esta prueba</h2>
+      <ul>
+        <li>Abrir esta página mediante HTTPS.</li>
+        <li>Usar inicialmente Android con Google Chrome.</li>
+        <li>Aceptar el permiso de notificaciones al pulsar el botón.</li>
+        <li>No publicar la clave privada VAPID.</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>
