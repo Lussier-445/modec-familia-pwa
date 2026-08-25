@@ -4,11 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#5b4bdb" />
-  <meta name="description" content="Aplicación de prueba para recibir avisos de asistencia MODEC." />
-  <title>MODEC Familia - Prueba Push</title>
+  <meta name="description" content="MODEC Familia - avisos de asistencia escolar." />
+  <title>MODEC Familia</title>
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/icon-192.png" />
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=4" />
 </head>
 <body>
   <main class="app-shell">
@@ -16,35 +16,61 @@
       <div class="logo">M</div>
       <div>
         <h1>MODEC Familia</h1>
-        <p>Prueba aislada de notificaciones de asistencia</p>
+        <p>Avisos de asistencia escolar</p>
       </div>
     </header>
 
-    <section class="card">
-      <h2>1. Preparar este dispositivo</h2>
+    <section class="card" id="profile-card">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Perfil del apoderado</p>
+          <h2>Identifique este dispositivo</h2>
+        </div>
+        <span id="profile-state" class="status-chip">Sin guardar</span>
+      </div>
+
+      <label for="guardian-full-name">Nombre y apellidos del apoderado</label>
+      <input
+        id="guardian-full-name"
+        type="text"
+        maxlength="100"
+        placeholder="Ejemplo: Sandra Díaz Uribe"
+        autocomplete="name"
+      />
+
       <label for="device-name">Nombre del dispositivo</label>
       <input
         id="device-name"
         type="text"
         maxlength="60"
-        placeholder="Ejemplo: Celular de María"
+        placeholder="Ejemplo: Celular de Sandra"
         autocomplete="off"
       />
 
-      <button id="enable-push" class="primary" type="button">
-        Activar notificaciones
-      </button>
+      <div class="actions">
+        <button id="save-profile" class="secondary" type="button">
+          Guardar perfil
+        </button>
+        <button id="enable-push" class="primary" type="button">
+          Activar notificaciones
+        </button>
+      </div>
 
-      <p id="status" class="status" role="status">
-        Esperando activación.
-      </p>
+      <p id="status" class="status" role="status">Listo para configurar.</p>
     </section>
 
     <section id="link-card" class="card hidden">
-      <h2>2. Descargar vinculación</h2>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Vinculación</p>
+          <h2>Dispositivo preparado</h2>
+        </div>
+        <span class="status-chip success">Activo</span>
+      </div>
+
       <p>
-        Este archivo contiene la suscripción necesaria para que la
-        computadora del colegio pueda enviar notificaciones a este equipo.
+        Descargue este archivo y entréguelo al operador del sistema MODEC
+        para vincular este equipo con el apoderado correcto.
       </p>
 
       <div class="device-code-row">
@@ -67,17 +93,36 @@
       </details>
     </section>
 
-    <section class="card note-card">
-      <h2>Requisitos de esta prueba</h2>
-      <ul>
-        <li>Abrir esta página mediante HTTPS.</li>
-        <li>Usar inicialmente Android con Google Chrome.</li>
-        <li>Aceptar el permiso de notificaciones al pulsar el botón.</li>
-        <li>No publicar la clave privada VAPID.</li>
-      </ul>
+    <section class="card" id="history-card">
+      <div class="section-heading history-heading">
+        <div>
+          <p class="eyebrow">Este dispositivo</p>
+          <h2>Historial de avisos</h2>
+        </div>
+        <button id="clear-history" class="text-button" type="button">
+          Borrar historial
+        </button>
+      </div>
+
+      <div id="history-summary" class="history-summary hidden">
+        <span>Último aviso</span>
+        <strong id="last-notification-title">—</strong>
+        <small id="last-notification-meta">—</small>
+      </div>
+
+      <div id="history-list" class="history-list" aria-live="polite">
+        <div class="empty-history">
+          Todavía no hay avisos recibidos en este dispositivo.
+        </div>
+      </div>
+
+      <p class="history-note">
+        Este historial se guarda únicamente en este dispositivo. El registro
+        oficial de asistencia permanece en el sistema del colegio.
+      </p>
     </section>
   </main>
 
-  <script src="./app.js?v=2" defer></script>
+  <script src="./app.js?v=4" defer></script>
 </body>
 </html>

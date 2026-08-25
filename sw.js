@@ -1,10 +1,13 @@
-const CACHE_NAME = "modec-familia-v2";
+const CACHE_NAME = "modec-familia-v4";
+const DB_NAME = "modec-familia-db";
+const DB_VERSION = 1;
+const NOTIFICATION_STORE = "notifications";
 
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles.css",
-  "./app.js?v=2",
+  "./styles.css?v=4",
+  "./app.js?v=4",
   "./manifest.webmanifest",
   "./vapid-public-key.json",
   "./icons/icon-192.png",
@@ -16,17 +19,13 @@ self.addEventListener("install", (event) => {
     (async () => {
       const cache = await caches.open(CACHE_NAME);
 
-      // Un archivo faltante no debe impedir que el service worker se instale.
       await Promise.allSettled(
         APP_SHELL.map(async (url) => {
           const response = await fetch(url, { cache: "reload" });
 
-          if (!response.ok) {
-            console.warn(`[SW] No se pudo precargar ${url}: HTTP ${response.status}`);
-            return;
+          if (response.ok) {
+            await cache.put(url, response);
           }
-
-          await cache.put(url, response);
         })
       );
     })()
@@ -39,22 +38,18 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
       const keys = await caches.keys();
-
       await Promise.all(
         keys
           .filter((key) => key !== CACHE_NAME)
           .map((key) => caches.delete(key))
       );
-
       await self.clients.claim();
     })()
   );
 });
 
 self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") {
-    return;
-  }
+  if (event.request.method !== "GET") return;
 
   event.respondWith(
     (async () => {
@@ -69,23 +64,100 @@ self.addEventListener("fetch", (event) => {
         return response;
       } catch (error) {
         const cached = await caches.match(event.request);
-
-        if (cached) {
-          return cached;
-        }
-
+        if (cached) return cached;
         throw error;
       }
     })()
   );
 });
 
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+
+      if (!db.objectStoreNames.contains(NOTIFICATION_STORE)) {
+        const store = db.createObjectStore(NOTIFICATION_STORE, {
+          keyPath: "notificationId",
+        });
+        store.createIndex("receivedAt", "receivedAt", { unique: false });
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function createFallbackId(payload) {
+  const base = [
+    payload.attendanceId || "attendance",
+    payload.type || payload.attendanceType || "event",
+    payload.date || "date",
+    payload.time || Date.now(),
+  ].join("-");
+
+  return `NOT-${base}`.replace(/[^a-zA-Z0-9_-]/g, "");
+}
+
+async function storeNotification(payload) {
+  const record = {
+    notificationId: payload.notificationId || createFallbackId(payload),
+    attendanceId: payload.attendanceId ?? null,
+    studentName: payload.studentName || payload.data?.studentName || "Estudiante",
+    type: payload.type || payload.attendanceType || payload.data?.attendanceType || "INGRESO",
+    date: payload.date || payload.data?.date || new Date().toISOString().slice(0, 10),
+    time:
+      payload.time ||
+      payload.data?.time ||
+      new Intl.DateTimeFormat("es-PE", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZone: "America/Lima",
+      }).format(new Date()),
+    title: payload.title || "Asistencia escolar",
+    message: payload.message || payload.body || "Tiene un nuevo aviso de asistencia.",
+    receivedAt: new Date().toISOString(),
+  };
+
+  const db = await openDatabase();
+
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(NOTIFICATION_STORE, "readwrite");
+      transaction.objectStore(NOTIFICATION_STORE).put(record);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+
+  return record;
+}
+
+async function notifyOpenClients(record) {
+  const clientList = await self.clients.matchAll({
+    type: "window",
+    includeUncontrolled: true,
+  });
+
+  for (const client of clientList) {
+    client.postMessage({
+      type: "MODEC_NOTIFICATION_STORED",
+      notification: record,
+    });
+  }
+}
+
 self.addEventListener("push", (event) => {
   let payload = {
-    title: "MODEC Familia",
+    title: "Asistencia escolar",
     body: "Tiene un nuevo aviso de asistencia.",
     url: "./",
-    tag: "modec-attendance",
   };
 
   if (event.data) {
@@ -97,17 +169,23 @@ self.addEventListener("push", (event) => {
   }
 
   event.waitUntil(
-    self.registration.showNotification(payload.title, {
-      body: payload.body,
-      icon: "./icons/icon-192.png",
-      badge: "./icons/icon-192.png",
-      tag: payload.tag,
-      renotify: true,
-      data: {
-        url: payload.url || "./",
-        ...payload.data,
-      },
-    })
+    (async () => {
+      const record = await storeNotification(payload);
+      await notifyOpenClients(record);
+
+      await self.registration.showNotification(record.title, {
+        body: record.message,
+        icon: "./icons/icon-192.png",
+        badge: "./icons/icon-192.png",
+        tag: record.notificationId,
+        renotify: false,
+        data: {
+          url: payload.url || "./",
+          notificationId: record.notificationId,
+          attendanceId: record.attendanceId,
+        },
+      });
+    })()
   );
 });
 
@@ -120,24 +198,21 @@ self.addEventListener("notificationclick", (event) => {
   ).href;
 
   event.waitUntil(
-    clients
+    self.clients
       .matchAll({
         type: "window",
         includeUncontrolled: true,
       })
       .then((clientList) => {
         for (const client of clientList) {
-          if (
-            client.url.startsWith(self.registration.scope) &&
-            "focus" in client
-          ) {
+          if (client.url.startsWith(self.registration.scope) && "focus" in client) {
             client.navigate(targetUrl);
             return client.focus();
           }
         }
 
-        return clients.openWindow
-          ? clients.openWindow(targetUrl)
+        return self.clients.openWindow
+          ? self.clients.openWindow(targetUrl)
           : undefined;
       })
   );

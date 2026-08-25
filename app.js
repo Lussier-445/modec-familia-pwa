@@ -1,11 +1,23 @@
 const enableButton = document.getElementById("enable-push");
+const saveProfileButton = document.getElementById("save-profile");
+const guardianFullNameInput = document.getElementById("guardian-full-name");
 const deviceNameInput = document.getElementById("device-name");
+const profileState = document.getElementById("profile-state");
 const statusElement = document.getElementById("status");
 const linkCard = document.getElementById("link-card");
 const deviceCodeElement = document.getElementById("device-code");
 const outputElement = document.getElementById("subscription-output");
 const downloadButton = document.getElementById("download-link");
 const copyButton = document.getElementById("copy-link");
+const historyList = document.getElementById("history-list");
+const historySummary = document.getElementById("history-summary");
+const lastNotificationTitle = document.getElementById("last-notification-title");
+const lastNotificationMeta = document.getElementById("last-notification-meta");
+const clearHistoryButton = document.getElementById("clear-history");
+
+const DB_NAME = "modec-familia-db";
+const DB_VERSION = 1;
+const NOTIFICATION_STORE = "notifications";
 
 let linkPayload = null;
 
@@ -14,13 +26,70 @@ function setStatus(message, type = "") {
   statusElement.className = `status ${type}`.trim();
 }
 
+function normalizeName(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function getProfile() {
+  return {
+    guardianFullName: normalizeName(
+      localStorage.getItem("modecGuardianFullName")
+    ),
+    deviceName: normalizeName(
+      localStorage.getItem("modecDeviceName")
+    ),
+  };
+}
+
+function updateProfileState() {
+  const profile = getProfile();
+  const saved = Boolean(profile.guardianFullName && profile.deviceName);
+
+  profileState.textContent = saved ? "Guardado" : "Sin guardar";
+  profileState.classList.toggle("success", saved);
+}
+
+function saveProfile({ silent = false } = {}) {
+  const guardianFullName = normalizeName(guardianFullNameInput.value);
+  const deviceName = normalizeName(deviceNameInput.value);
+
+  if (guardianFullName.length < 5 || !guardianFullName.includes(" ")) {
+    if (!silent) {
+      setStatus(
+        "Ingrese el nombre y los apellidos del apoderado. Ejemplo: Sandra Díaz Uribe.",
+        "warning"
+      );
+      guardianFullNameInput.focus();
+    }
+    return null;
+  }
+
+  if (!deviceName) {
+    if (!silent) {
+      setStatus("Ingrese un nombre para identificar este dispositivo.", "warning");
+      deviceNameInput.focus();
+    }
+    return null;
+  }
+
+  localStorage.setItem("modecGuardianFullName", guardianFullName);
+  localStorage.setItem("modecDeviceName", deviceName);
+  updateProfileState();
+
+  if (!silent) {
+    setStatus("Perfil guardado correctamente.", "success");
+  }
+
+  return { guardianFullName, deviceName };
+}
+
 function withTimeout(promise, milliseconds, message) {
   let timerId;
 
   const timeoutPromise = new Promise((_, reject) => {
-    timerId = window.setTimeout(() => {
-      reject(new Error(message));
-    }, milliseconds);
+    timerId = window.setTimeout(() => reject(new Error(message)), milliseconds);
   });
 
   return Promise.race([promise, timeoutPromise]).finally(() => {
@@ -59,10 +128,7 @@ function getOrCreateDeviceUid() {
     return saved;
   }
 
-  const randomPart = createRandomId()
-    .slice(0, 10)
-    .toUpperCase();
-
+  const randomPart = createRandomId().slice(0, 10).toUpperCase();
   const uid = `DEV-${randomPart.slice(0, 5)}-${randomPart.slice(5)}`;
   localStorage.setItem("modecDeviceUid", uid);
 
@@ -114,13 +180,10 @@ async function registerAndWaitForServiceWorker() {
 
   setStatus("Registrando el servicio de notificaciones...");
 
-  const registration = await navigator.serviceWorker.register(
-    "./sw.js?v=2",
-    {
-      scope: "./",
-      updateViaCache: "none",
-    }
-  );
+  const registration = await navigator.serviceWorker.register("./sw.js?v=4", {
+    scope: "./",
+    updateViaCache: "none",
+  });
 
   try {
     await registration.update();
@@ -153,7 +216,6 @@ async function requestNotificationPermission() {
   }
 
   setStatus("Esperando autorización de notificaciones...");
-
   const permission = await Notification.requestPermission();
 
   if (permission !== "granted") {
@@ -163,15 +225,36 @@ async function requestNotificationPermission() {
   return permission;
 }
 
-async function activatePush() {
-  const deviceName = deviceNameInput.value.trim();
+function buildLinkPayload(subscription, profile) {
+  const deviceUid = getOrCreateDeviceUid();
 
-  if (!deviceName) {
+  return {
+    version: 2,
+    createdAt: new Date().toISOString(),
+    guardianFullName: profile.guardianFullName,
+    deviceUid,
+    deviceName: profile.deviceName,
+    platform: detectPlatform(),
+    userAgent: navigator.userAgent,
+    subscription: subscription.toJSON(),
+  };
+}
+
+function renderLinkPayload(payload) {
+  linkPayload = payload;
+  deviceCodeElement.textContent = payload.deviceUid;
+  outputElement.textContent = JSON.stringify(payload, null, 2);
+  linkCard.classList.remove("hidden");
+}
+
+async function activatePush() {
+  const profile = saveProfile({ silent: true });
+
+  if (!profile) {
     setStatus(
-      "Ingrese un nombre para identificar este dispositivo.",
+      "Complete y guarde correctamente el nombre del apoderado y del dispositivo.",
       "warning"
     );
-    deviceNameInput.focus();
     return;
   }
 
@@ -184,10 +267,7 @@ async function activatePush() {
   }
 
   if (!("PushManager" in window)) {
-    setStatus(
-      "Este navegador no admite notificaciones Web Push.",
-      "error"
-    );
+    setStatus("Este navegador no admite notificaciones Web Push.", "error");
     return;
   }
 
@@ -196,7 +276,6 @@ async function activatePush() {
   setStatus("Preparando el dispositivo...");
 
   try {
-    // Debe solicitarse directamente desde el clic del usuario.
     await requestNotificationPermission();
 
     const publicKey = await loadPublicKey();
@@ -217,33 +296,23 @@ async function activatePush() {
       );
     }
 
-    const deviceUid = getOrCreateDeviceUid();
+    renderLinkPayload(buildLinkPayload(subscription, profile));
 
-    linkPayload = {
-      version: 1,
-      createdAt: new Date().toISOString(),
-      deviceUid,
-      deviceName,
-      platform: detectPlatform(),
-      userAgent: navigator.userAgent,
-      subscription: subscription.toJSON(),
-    };
-
-    deviceCodeElement.textContent = deviceUid;
-    outputElement.textContent = JSON.stringify(linkPayload, null, 2);
-    linkCard.classList.remove("hidden");
+    if (navigator.storage?.persist) {
+      try {
+        await navigator.storage.persist();
+      } catch (error) {
+        console.warn("No se pudo solicitar almacenamiento persistente.", error);
+      }
+    }
 
     setStatus(
-      "Notificaciones activadas. Descargue el archivo de vinculación.",
+      "Notificaciones activadas. Descargue el archivo de vinculación actualizado.",
       "success"
     );
   } catch (error) {
     console.error("Error activando Web Push:", error);
-
-    setStatus(
-      error.message || "No se pudieron activar las notificaciones.",
-      "error"
-    );
+    setStatus(error.message || "No se pudieron activar las notificaciones.", "error");
   } finally {
     enableButton.disabled = false;
   }
@@ -251,24 +320,21 @@ async function activatePush() {
 
 function downloadLinkFile() {
   if (!linkPayload) {
+    setStatus("Primero active las notificaciones.", "warning");
     return;
   }
 
-  const blob = new Blob(
-    [JSON.stringify(linkPayload, null, 2)],
-    { type: "application/json" }
-  );
-
+  const blob = new Blob([JSON.stringify(linkPayload, null, 2)], {
+    type: "application/json",
+  });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
 
   anchor.href = url;
   anchor.download = `modec-device-${linkPayload.deviceUid}.json`;
-
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-
   URL.revokeObjectURL(url);
 }
 
@@ -278,34 +344,221 @@ async function copyLinkJson() {
   }
 
   try {
-    await navigator.clipboard.writeText(
-      JSON.stringify(linkPayload, null, 2)
-    );
-
+    await navigator.clipboard.writeText(JSON.stringify(linkPayload, null, 2));
     setStatus("Datos de vinculación copiados.", "success");
   } catch (error) {
     console.error(error);
-
-    setStatus(
-      "No se pudo copiar. Use el botón Descargar vinculación.",
-      "error"
-    );
+    setStatus("No se pudo copiar. Use Descargar vinculación.", "error");
   }
 }
 
-enableButton.addEventListener("click", activatePush);
-downloadButton.addEventListener("click", downloadLinkFile);
-copyButton.addEventListener("click", copyLinkJson);
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-window.addEventListener("load", () => {
-  if (!window.isSecureContext) {
-    setStatus(
-      "Abra esta aplicación mediante HTTPS para activar Web Push.",
-      "error"
-    );
-    enableButton.disabled = true;
+    request.onupgradeneeded = () => {
+      const db = request.result;
+
+      if (!db.objectStoreNames.contains(NOTIFICATION_STORE)) {
+        const store = db.createObjectStore(NOTIFICATION_STORE, {
+          keyPath: "notificationId",
+        });
+        store.createIndex("receivedAt", "receivedAt", { unique: false });
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function getHistory() {
+  const db = await openDatabase();
+
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction(NOTIFICATION_STORE, "readonly");
+      const store = transaction.objectStore(NOTIFICATION_STORE);
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const records = Array.isArray(request.result) ? request.result : [];
+        records.sort((a, b) =>
+          String(b.receivedAt || "").localeCompare(String(a.receivedAt || ""))
+        );
+        resolve(records);
+      };
+
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function clearHistory() {
+  const records = await getHistory();
+
+  if (records.length === 0) {
+    setStatus("El historial ya está vacío.");
     return;
   }
 
-  setStatus("Listo para activar las notificaciones.");
+  if (!window.confirm("¿Desea borrar el historial guardado en este dispositivo?")) {
+    return;
+  }
+
+  const db = await openDatabase();
+
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(NOTIFICATION_STORE, "readwrite");
+      transaction.objectStore(NOTIFICATION_STORE).clear();
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+
+  await renderHistory();
+  setStatus("Historial local borrado.", "success");
+}
+
+function formatDateLabel(value) {
+  if (!value) return "Fecha no disponible";
+
+  const parsed = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return value;
+
+  return new Intl.DateTimeFormat("es-PE", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  }).format(parsed);
+}
+
+function normalizeAttendanceType(value) {
+  return String(value || "").toUpperCase() === "SALIDA" ? "SALIDA" : "INGRESO";
+}
+
+function renderHistoryItem(record) {
+  const type = normalizeAttendanceType(record.type || record.attendanceType);
+  const wrapper = document.createElement("article");
+  wrapper.className = "history-item";
+
+  const marker = document.createElement("span");
+  marker.className = `history-marker ${type === "SALIDA" ? "exit" : "entry"}`;
+
+  const content = document.createElement("div");
+  content.className = "history-content";
+
+  const title = document.createElement("strong");
+  title.textContent = record.studentName || "Estudiante";
+
+  const meta = document.createElement("span");
+  meta.textContent = `${type === "SALIDA" ? "Salida" : "Ingreso"} · ${record.time || "--:--"}`;
+
+  const body = document.createElement("small");
+  body.textContent = record.message || record.body || "Aviso de asistencia recibido.";
+
+  content.append(title, meta, body);
+  wrapper.append(marker, content);
+
+  return wrapper;
+}
+
+async function renderHistory() {
+  try {
+    const records = await getHistory();
+    historyList.innerHTML = "";
+
+    if (records.length === 0) {
+      historySummary.classList.add("hidden");
+      const empty = document.createElement("div");
+      empty.className = "empty-history";
+      empty.textContent = "Todavía no hay avisos recibidos en este dispositivo.";
+      historyList.appendChild(empty);
+      return;
+    }
+
+    const last = records[0];
+    historySummary.classList.remove("hidden");
+    lastNotificationTitle.textContent = last.studentName || "Estudiante";
+    lastNotificationMeta.textContent = `${
+      normalizeAttendanceType(last.type || last.attendanceType) === "SALIDA"
+        ? "Salida"
+        : "Ingreso"
+    } · ${last.time || "--:--"} · ${formatDateLabel(last.date)}`;
+
+    let currentDate = null;
+
+    for (const record of records) {
+      const date = record.date || "sin-fecha";
+
+      if (date !== currentDate) {
+        currentDate = date;
+        const groupTitle = document.createElement("h3");
+        groupTitle.className = "history-date";
+        groupTitle.textContent = formatDateLabel(record.date);
+        historyList.appendChild(groupTitle);
+      }
+
+      historyList.appendChild(renderHistoryItem(record));
+    }
+  } catch (error) {
+    console.error("No se pudo cargar el historial:", error);
+    historyList.innerHTML = '<div class="empty-history error-text">No se pudo cargar el historial local.</div>';
+  }
+}
+
+async function restoreExistingSubscription() {
+  const profile = getProfile();
+
+  if (!("serviceWorker" in navigator) || !profile.guardianFullName || !profile.deviceName) {
+    return;
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.getRegistration("./");
+    if (!registration) return;
+
+    const subscription = await registration.pushManager.getSubscription();
+    if (!subscription) return;
+
+    renderLinkPayload(buildLinkPayload(subscription, profile));
+  } catch (error) {
+    console.warn("No se pudo restaurar la vinculación existente.", error);
+  }
+}
+
+saveProfileButton.addEventListener("click", () => saveProfile());
+enableButton.addEventListener("click", activatePush);
+downloadButton.addEventListener("click", downloadLinkFile);
+copyButton.addEventListener("click", copyLinkJson);
+clearHistoryButton.addEventListener("click", clearHistory);
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type === "MODEC_NOTIFICATION_STORED") {
+      renderHistory();
+    }
+  });
+}
+
+window.addEventListener("load", async () => {
+  const profile = getProfile();
+  guardianFullNameInput.value = profile.guardianFullName;
+  deviceNameInput.value = profile.deviceName;
+  updateProfileState();
+
+  if (!window.isSecureContext) {
+    setStatus("Abra esta aplicación mediante HTTPS para activar Web Push.", "error");
+    enableButton.disabled = true;
+  } else {
+    setStatus("Listo para configurar.");
+  }
+
+  await renderHistory();
+  await restoreExistingSubscription();
 });
